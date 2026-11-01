@@ -675,6 +675,33 @@ def test_shorten_stdout_records_context_savings(tmp_path):
     assert rows[0]["saved_tokens"] > 0
 
 
+def test_shorten_stdout_special_tokens_are_plain_text():
+    """Special tokens in shell output truncate as text instead of crashing.
+
+    Regression: ``_shorten_stdout`` encoded stdout without
+    ``disallowed_special=[]``, so any command whose output contained a tiktoken
+    special token string such as ``<|endoftext|>`` (common in LLM training
+    data, chat templates, and tokenizer configs) made ``encode()`` raise
+    ValueError and fail the whole shell tool call. ``len_tokens()`` already
+    counts special tokens as plain text; the shell truncation path must treat
+    them the same way.
+    """
+    from gptme.util.tokens import get_tokenizer
+
+    if get_tokenizer("gpt-4o") is None:
+        pytest.skip("tiktoken encoding unavailable")
+
+    stdout = "\n".join(f"training sample {i} <|endoftext|>" for i in range(3000))
+
+    # Default budgets from _get_truncation_budget: 2000 pre + 8000 post tokens.
+    shortened = _shorten_stdout(stdout, pre_tokens=2000, post_tokens=8000)
+
+    assert "output truncated" in shortened
+    assert shortened.startswith("training sample 0")
+    assert shortened.endswith("training sample 2999 <|endoftext|>")
+    assert "<|endoftext|>" in shortened
+
+
 def test_get_path_fn_uses_current_logdir(tmp_path):
     manager = MagicMock()
     manager.logdir = tmp_path
